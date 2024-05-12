@@ -60,6 +60,14 @@ counter = 0
 id = -1
 imageStudents = []
 
+# Create an Excel workbook and set up the worksheet
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.append(["ID", "Name", "Total Attendance", "Last Attendance Time"])
+
+# Dictionary to store the last attendance time for each student
+last_attendance_time_dict = {}
+
 
 while True:
 
@@ -95,6 +103,35 @@ while True:
                 camUI = cvzone.cornerRect(camUI, bbox, rt=0, t=1)
 
                 id = studentsId[matchIndx]
+
+                # Write attendance to Excel file
+                student_info = db.reference(f'Students/{id}').get()
+                datetime_now = datetime.now()
+                current_date = datetime_now.strftime("%Y-%m-%d")
+                attendance_file_name = f"attendance_record_{current_date}.xlsx"
+
+                # Check if the attendance file exists for today
+                if not os.path.exists(attendance_file_name):
+                    # Create a new Excel file for today
+                    attendance_workbook = openpyxl.Workbook()
+                    attendance_sheet = attendance_workbook.active
+                    attendance_sheet.append(["ID", "Name", "Program", "Block&Year", "Total Attendance", "Date/Time"])
+                else:
+                    # Load the existing Excel file for today
+                    attendance_workbook = openpyxl.load_workbook(attendance_file_name)
+                    attendance_sheet = attendance_workbook.active
+
+                # Check if the student has attended within the last 10 hours
+                last_attendance_time = last_attendance_time_dict.get(id)
+                if last_attendance_time is None or (datetime_now - last_attendance_time).total_seconds() / 36000 >= 10:
+                    # Record student attendance
+                    attendance_sheet.append(
+                        [id, student_info['name'], student_info['Program'], student_info['block&year'],
+                         student_info['total_attendance'], datetime_now.strftime("%Y-%m-%d %H:%M:%S")])
+                    attendance_workbook.save(attendance_file_name)
+                    # Update the last attendance time in the dictionary
+                    last_attendance_time_dict[id] = datetime_now
+
                 if counter == 0:
                     cvzone.putTextRect(camUI, "Loading", (100, 400))
                     cv2.waitKey(1)
@@ -120,12 +157,12 @@ while True:
                                                        "%Y-%m-%d %H:%M:%S")
                     secondsElapsed = (datetime.now() - datetimeObject).total_seconds()
                     print(secondsElapsed)
-                    if secondsElapsed > 30:
+                    if secondsElapsed > 36000:
                         ref = db.reference(f'Students/{id}')
                         studentsIdInfo['total_attendance'] = int(studentsIdInfo.get('total_attendance', 0)) + 1
 
-                    ref.child('total_attendance').set(studentsIdInfo['total_attendance'])
-                    ref.child('recent_attendance').set(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        ref.child('total_attendance').set(studentsIdInfo['total_attendance'])
+                        ref.child('recent_attendance').set(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 else:
                     imgFileType = 3
                     counter = 0
