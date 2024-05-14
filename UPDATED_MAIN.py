@@ -19,7 +19,14 @@ import pandas as pd
 import openpyxl
 from openpyxl import Workbook
 from datetime import datetime
-
+import emailsending
+import schedule
+import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+import pandas as pd
 
 cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
@@ -41,9 +48,6 @@ filesPathList = os.listdir(folderFilesPath)
 imgFilesList = []
 for path in filesPathList:
     imgFilesList.append(cv2.imread(os.path.join(folderFilesPath, path)))
-#print(len(imgFilesList))
-
-
 
 # encoding file
 print("loading")
@@ -82,8 +86,6 @@ while True:
     camUI[162:162 + 480, 55:55 + 640] = img
     camUI[44:44 + 633, 808:808 + 414] = imgFilesList[imgFileType]
 
-
-
     if facesFrame:
         for encodeFace, faceLocation in zip(eFrame, facesFrame):
             matches = face_recognition.compare_faces(encodeListSearched, encodeFace)
@@ -95,48 +97,64 @@ while True:
             # print("matchIndx", matchIndx)
 
             if matches[matchIndx]:
-                # print("Student found")
-                # print(studentsId[matchIndx])
-                y1, x2, y2, x1 = faceLocation
-                y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-                bbox = 55 + x1, 162 + y1, x2 - x1, y2 - y1
-                camUI = cvzone.cornerRect(camUI, bbox, rt=0, t=1)
+                    # print("Student found")
+                    # print(studentsId[matchIndx])
+                    y1, x2, y2, x1 = faceLocation
+                    y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
+                    bbox = 55 + x1, 162 + y1, x2 - x1, y2 - y1
+                    camUI = cvzone.cornerRect(camUI, bbox, rt=0, t=1)
 
-                id = studentsId[matchIndx]
+                    id = studentsId[matchIndx]
 
-                # Write attendance to Excel file
-                student_info = db.reference(f'Students/{id}').get()
-                datetime_now = datetime.now()
-                current_date = datetime_now.strftime("%Y-%m-%d")
-                attendance_file_name = f"attendance_record_{current_date}.xlsx"
+                    # Define the folder path to save the attendance file
+                    attendance_folder = 'attendance_records'
 
-                # Check if the attendance file exists for today
-                if not os.path.exists(attendance_file_name):
-                    # Create a new Excel file for today
-                    attendance_workbook = openpyxl.Workbook()
-                    attendance_sheet = attendance_workbook.active
-                    attendance_sheet.append(["ID", "Name", "Program", "Block&Year", "Total Attendance", "Date/Time"])
-                else:
-                    # Load the existing Excel file for today
-                    attendance_workbook = openpyxl.load_workbook(attendance_file_name)
-                    attendance_sheet = attendance_workbook.active
+                    # Create the folder if it doesn't exist
+                    if not os.path.exists(attendance_folder):
+                        os.makedirs(attendance_folder)
 
-                # Check if the student has attended within the last 10 hours
-                last_attendance_time = last_attendance_time_dict.get(id)
-                if last_attendance_time is None or (datetime_now - last_attendance_time).total_seconds() / 36000 >= 10:
+                    student_info = db.reference(f'Students/{id}').get()
+                    datetime_now = datetime.now()
+                    current_date = datetime_now.strftime("%Y-%m-%d")
+                    attendance_file_name = f"attendance_record_{current_date}.xlsx"
+                    attendance_file_path = os.path.join(attendance_folder, attendance_file_name)
+
+                    # Check if the attendance file exists for today
+                    if not os.path.exists(attendance_file_path):
+                        # Create a new Excel file for today
+                        attendance_workbook = Workbook()
+                        attendance_sheet = attendance_workbook.active
+                        attendance_sheet.append(["ID", "Name", "Program", "Block&Year", "Total Attendance", "Date/Time"])
+                    else:
+                        # Load the existing Excel file for today
+                        attendance_workbook = openpyxl.load_workbook(attendance_file_path)
+                        attendance_sheet = attendance_workbook.active
+
+                        # Check if the student has already attended today
+                        existing_attendance_records = attendance_sheet.values
+                        existing_attendance_records = [record for record in existing_attendance_records if record[0] == id]
+
+                        if existing_attendance_records:
+                            print("Student has already attended today.")
+                            attendance_workbook.close()
+
                     # Record student attendance
                     attendance_sheet.append(
                         [id, student_info['name'], student_info['Program'], student_info['block&year'],
                          student_info['total_attendance'], datetime_now.strftime("%Y-%m-%d %H:%M:%S")])
-                    attendance_workbook.save(attendance_file_name)
+                    attendance_workbook.save(attendance_file_path)
+
                     # Update the last attendance time in the dictionary
                     last_attendance_time_dict[id] = datetime_now
 
-                if counter == 0:
-                    cvzone.putTextRect(camUI, "Loading", (100, 400))
-                    cv2.waitKey(1)
-                    counter = 1
-                    imgFileType = 1
+                    # imgfiletype start for ui
+                    if counter == 0:
+                        font_face = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale = 2.5
+                        cv2.putText(camUI, "Loading", (100, 400), font_face, font_scale, (255, 0, 0), 2)
+                        cv2.waitKey(1)
+                        counter = 1
+                        imgFileType = 1
 
             if counter != 0:
 
@@ -144,7 +162,6 @@ while True:
                     # data
                     studentsIdInfo = db.reference(f'Students/{id}').get()
                     print(studentsIdInfo)
-
 
                     # get image
                     blob = bucket.blob(f'Images/{id}.png')
@@ -163,10 +180,10 @@ while True:
 
                         ref.child('total_attendance').set(studentsIdInfo['total_attendance'])
                         ref.child('recent_attendance').set(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                else:
-                    imgFileType = 3
-                    counter = 0
-                    camUI[44:44 + 633, 808:808 + 414] = imgFilesList[imgFileType]
+                    else:
+                        imgFileType = 3
+                        counter = 0
+                        camUI[44:44 + 633, 808:808 + 414] = imgFilesList[imgFileType]
 
             if imgFileType != 3:
 
@@ -174,8 +191,6 @@ while True:
                     imgFileType = 2
 
                 camUI[44:44 + 633, 808:808 + 414] = imgFilesList[imgFileType]
-
-
 
                 if counter <= 10:
                     cv2.putText(camUI, str(studentsIdInfo['Program']), (1006, 550),
@@ -192,7 +207,6 @@ while True:
 
                     camUI[175:175 + 216, 909:909 + 216] = imageStudents
 
-
                 counter += 1
 
                 if counter >= 20:
@@ -204,7 +218,6 @@ while True:
     else:
         imgFileType = 0
         counter = 0
-
 
     #cv2.imshow("attendance", img)
     cv2.imshow("Student-face-cam", camUI)
